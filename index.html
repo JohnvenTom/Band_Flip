@@ -2462,6 +2462,69 @@
                 lightOn: -1,
                 lightOff: -1
             },
+            preloadedSounds: {},
+            loadingProgress: 0,
+            totalSounds: 0,
+            loadedSounds: 0,
+
+            /**
+             * 预加载所有音效
+             * @returns {Promise} 预加载完成的Promise
+             */
+            preload() {
+                return new Promise((resolve) => {
+                    // 计算总音效数量
+                    this.totalSounds = 0;
+                    this.loadedSounds = 0;
+                    this.loadingProgress = 0;
+                    
+                    // 遍历所有音效类型
+                    Object.keys(SOUND_CONFIG).forEach(type => {
+                        const sounds = SOUND_CONFIG[type];
+                        this.totalSounds += sounds.length;
+                    });
+
+                    if (this.totalSounds === 0) {
+                        resolve();
+                        return;
+                    }
+
+                    // 预加载每个音效
+                    Object.keys(SOUND_CONFIG).forEach(type => {
+                        const sounds = SOUND_CONFIG[type];
+                        this.preloadedSounds[type] = [];
+
+                        sounds.forEach((soundPath, index) => {
+                            const audio = new Audio(soundPath);
+                            audio.preload = 'auto';
+                            
+                            audio.addEventListener('loadeddata', () => {
+                                this.loadedSounds++;
+                                this.loadingProgress = Math.round((this.loadedSounds / this.totalSounds) * 100);
+                                
+                                // 更新加载界面
+                                const loadingText = document.querySelector('.loading-text');
+                                if (loadingText) {
+                                    loadingText.textContent = `加载音效中... ${this.loadingProgress}%`;
+                                }
+
+                                if (this.loadedSounds === this.totalSounds) {
+                                    resolve();
+                                }
+                            });
+
+                            audio.addEventListener('error', () => {
+                                this.loadedSounds++;
+                                if (this.loadedSounds === this.totalSounds) {
+                                    resolve();
+                                }
+                            });
+
+                            this.preloadedSounds[type].push(audio);
+                        });
+                    });
+                });
+            },
 
             /**
              * 播放指定类型的音效（相邻不重复）
@@ -2482,7 +2545,15 @@
 
                 this.lastPlayed[type] = index;
 
-                const audio = new Audio(sounds[index]);
+                // 使用预加载的音频对象或创建新的
+                let audio;
+                if (this.preloadedSounds[type] && this.preloadedSounds[type][index]) {
+                    // 克隆预加载的音频对象以允许同时播放多个相同音效
+                    audio = this.preloadedSounds[type][index].cloneNode();
+                } else {
+                    audio = new Audio(sounds[index]);
+                }
+                
                 audio.volume = volume !== null ? volume : gameSettings.voiceVolume;
                 audio.play().catch(() => {});
             },
@@ -4148,12 +4219,15 @@
         /**
          * 游戏初始化函数
          */
-        function init() {
+        async function init() {
             createFloatingNotes();
             gameSettings.load();
             musicPlayer.init();
             initEventListeners();
             initStarTrail();
+            
+            // 预加载音效
+            await soundManager.preload();
             
             setTimeout(() => {
                 elements.loadingOverlay.classList.add('hidden');
